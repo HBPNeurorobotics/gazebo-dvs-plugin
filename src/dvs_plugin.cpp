@@ -149,7 +149,7 @@ namespace gazebo
 
     string imuName = "imu";
     if (_sdf->HasElement("imuTopicName"))
-      imuName = _sdf->GetElement("imusTopicName")->Get<std::string>();
+      imuName = _sdf->GetElement("imuTopicName")->Get<std::string>();
 
     const string imuTopic = sensorName + imuName;
 
