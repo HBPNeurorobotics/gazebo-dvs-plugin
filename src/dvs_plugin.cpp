@@ -83,9 +83,6 @@ namespace gazebo
     // initialize the message tunnel.
     this->imu_msgs_ = {};
 
-    velocity_x = velocity_y = velocity_z = 0.0;
-    angular_velocity_x = angular_velocity_y = angular_velocity_z = 0.0;
-
     // store the t1 and t2 for two immediate frames.
     this->current_time_ = ros::Time::now();
     this->last_time_ = ros::Time::now();
@@ -109,14 +106,10 @@ namespace gazebo
     // Get the parent camera sensor
     this->parentCameraSensor = std::dynamic_pointer_cast<gazebo::sensors::CameraSensor>(_sensor);
     // Get the parent depth camera sensor
-    this->parentDepthSensor = std::dynamic_pointer_cast<gazebo::sensors::DepthCameraSensor>(_sensor);
     this->camera = this->parentCameraSensor->Camera();
-    this->depthCamera = this->parentDepthSensor->DepthCamera();
 #else
     this->parentCameraSensor = boost::dynamic_pointer_cast<sensors::CameraSensor>(_sensor);
-    this->parentDepthSensor = boost::dynamic_pointer_cast<sensors::DepthCameraSensor>(_sensor);
     this->camera = this->parentCameraSensor->GetCamera();
-    this->depthCamera = this->parentDepthSensor->GetDepthCamera();
 #endif
 
     if (!this->parentCameraSensor)
@@ -167,28 +160,16 @@ namespace gazebo
 
     event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 10, true);
 
-    // this->newFrameConnection = this->camera->ConnectNewImageFrame(
-    //     boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
+    this->newFrameConnection = this->camera->ConnectNewImageFrame(
+        boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
 
-    // this->newDepthFrameConnection = this->depthCamera->ConnectNewDepthFrame(boost::bind(&DvsPlugin::depthCallback, this, _1, this->width, this->height, this->depth, this->format));
-
-    // Connect to the updated events
-    this->cameraUpdateConnection = this->parentCameraSensor->ConnectUpdated(std::bind(&DvsPlugin::cameraCallback, this));
-    this->depthUpdateConnection = this->parentDepthSensor->ConnectUpdated(std::bind(&DvsPlugin::depthCallback, this));
-
-    // Make sure the parent sensors are valid
-    if (!this->parentCameraSensor || !this->parentDepthSensor)
-    {
-      gzerr << "Couldn't find a parent CameraSensor or DepthCameraSensor\n";
-      return;
-    }
 
     // Make sure the parent sensors are active
     this->parentCameraSensor->SetActive(true);
-    this->parentDepthSensor->SetActive(true);
 
 
     this->imu_sub_ = this->node_handle_.subscribe("/iris/imu", 1000, &DvsPlugin::imuCallback, this);
+
 
     // Initialize the publisher that publishes the IMU data
     this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);

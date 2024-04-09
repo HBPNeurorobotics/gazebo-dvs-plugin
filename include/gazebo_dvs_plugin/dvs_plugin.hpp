@@ -79,25 +79,20 @@ namespace gazebo
     protected: ros::Time last_time_, current_time_;
 
     // depth camera sensor and depth image
-    protected: sensors::DepthCameraSensorPtr parentDepthSensor;
-    protected: rendering::DepthCameraPtr depthCamera;
     protected: const float* curr_dep_img_;
 
-    private: event::ConnectionPtr cameraUpdateConnection, depthUpdateConnection;
+    private: event::ConnectionPtr cameraUpdateConnection;
 
     protected: ros::NodeHandle node_handle_;
     protected: ros::Publisher event_pub_;
     protected: string namespace_;
     
     // for imu data accquisition
-    protected: ros::Subscriber imu_sub_;
-    protected: ros::Publisher imu_pub_;
+    protected: ros::Subscriber imu_sub_, dep_sub_;
+    protected: ros::Publisher imu_pub_, dep_pub_;
     // protected: sensor_msgs::Imu latest_imu_msg_;
     // store a sequence of imu messages for ESIM computing.
     protected: std::vector<sensor_msgs::Imu> imu_msgs_;
-    protected:
-      float velocity_x, velocity_y, velocity_z;
-      float angular_velocity_x, angular_velocity_y, angular_velocity_z;
 
     private: Mat last_image;
     private: bool has_last_image;
