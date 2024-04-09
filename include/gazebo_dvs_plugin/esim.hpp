@@ -54,9 +54,9 @@ public:
 
   static void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float *curr_dep_img_, ros::Time &current_time, ros::Time &last_time);
 
-  static void egoVelocity(const double Z, const double u, const double v, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, std::vector<double> &B);
+  static void egoVelocity(const float Z, const float u, const float v, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, std::vector<float> &B);
 
-  static void lightChange(const double l1, const double l2, const double f_current_time, const double f_last_time);
+  static void lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time);
 
-  static void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, double *min_t_v, double *min_t_b);
+  static void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, float *min_t_v, float *min_t_b);
 };

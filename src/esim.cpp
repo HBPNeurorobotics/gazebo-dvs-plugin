@@ -61,7 +61,7 @@ void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_m
       }
 
       // ros::Time stamp = imu_msg.header.stamp;
-      // double delta_t_ = stamp.sec - this->stamp_last_imu_.sec + (stamp.nsec - this->stamp_last_imu_.nsec) / 1e9;
+      // float delta_t_ = stamp.sec - this->stamp_last_imu_.sec + (stamp.nsec - this->stamp_last_imu_.nsec) / 1e9;
       geometry_msgs::Quaternion orientation;
       geometry_msgs::Vector3 angular_velocity, linear_acceleration;
       orientation = imu_msg.orientation;
@@ -81,48 +81,49 @@ void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_m
           orientation.z,
           orientation.w);
       tf::Matrix3x3 m(q);
-      double roll, pitch, yaw;
+      float roll, pitch, yaw;
       m.getRPY(roll, pitch, yaw);
-      double min_t_v, min_t_b;
+      float min_t_v, min_t_b;
       adaptiveSample(last_image, curr_image, curr_dep_img_, current_time, last_time, &min_t_v, &min_t_b);
-      double lambda_b = 0.5, lambda_v = 0.5;
-      double t_sample_interval = lambda_b * min_t_b + lambda_v * min_t_v;
+      float lambda_b = 0.5, lambda_v = 0.5;
+      float t_sample_interval = lambda_b * min_t_b + lambda_v * min_t_v;
     }
   }
 }
 
-void egoVelocity(const double Z, const double u, const double v, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, std::vector<double, 2> &B)
+void egoVelocity(const float Z, const float u, const float v, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, float *B)
 {
   // page 12 formula 4 for "ESIM: an Open Event Camera Simulator"
-  B[0] = -1 / Z * velocity.x + u / Z * velocity.z + u * v * angular_velocity.x - (1 + u * u) * angular_velocity.y + v * angular_velocity.z;
-  B[1] = -1 / Z * velocity.y + v / Z * velocity.z + (1 + v * v) * angular_velocity.x - u * v * angular_velocity.y - u * angular_velocity.z;
+  *B = std::fabs(-1 / Z * velocity.x + u / Z * velocity.z + u * v * angular_velocity.x - (1 + u * u) * angular_velocity.y + v * angular_velocity.z) + std::fabs(-1 / Z * velocity.y + v / Z * velocity.z + (1 + v * v) * angular_velocity.x - u * v * angular_velocity.y - u * angular_velocity.z);
 }
 
-void lightChange(const double l1, const double l2, const double f_current_time, const double f_last_time, double *delta_l)
+void lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time, float *delta_l)
 {
   // l1 and l2 are the logirithmic light intensities of the two frames
   *delta_l = (l2 - l1) / (f_current_time - f_last_time);
 }
 
-void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, cv::Mat *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, double *min_t_v, double *min_t_b)
+void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, float *min_t_v, float *min_t_b)
 {
-  double f_current_time = current_time.toSec();
-  double f_last_time = last_time.toSec();
+  float f_current_time = current_time.toSec();
+  float f_last_time = last_time.toSec();
+
+  cv::Mat temp_image = cv::Mat::zeros(last_image->rows, last_image->cols, CV_32F);
 
   // calculate the velocity and angular velocity for the camera ego movement
-  curr_dep_img_.forEach<double>([&](double &pixel, const int *position) -> void
-                                {
-                                  std::vector<double, 2> B;
-                                  egoVelocity(pixel, position[0], position[1], velocity, angular_velocity, &B); });
+  temp_image.forEach<float>([&](float &pixel, const int *position) -> void
+                            {
+                                  float Z = curr_dep_img_[(position[0]*last_image->rows+ position[1])];
+                                  egoVelocity(Z, position[0], position[1], velocity, angular_velocity, &pixel); });
   // calculate the light change between the two frames
-  last_image.forEach<double>([&](double &l1, const int *position) -> void
-                             {
-    double l2 = curr_image->at<uchar>(position[0], position[1]);
+  last_image.forEach<float>([&](float &l1, const int *position) -> void
+                            {
+    float l2 = curr_image->at<uchar>(position[0], position[1]);
     lightChange(l1, l2, f_current_time, f_last_time, &l1); });
-  double max;
+  float max;
   cv::Point min_loc, max_loc;
   // get the minimum value of the two
-  cv::minMaxLoc(curr_dep_img_, &min_t_v, &max, &min_loc, &max_loc);
+  cv::minMaxLoc(temp_image, &min_t_v, &max, &min_loc, &max_loc);
   cv::minMaxLoc(last_image, &min_t_b, &max, &min_loc, &max_loc);
 }
 

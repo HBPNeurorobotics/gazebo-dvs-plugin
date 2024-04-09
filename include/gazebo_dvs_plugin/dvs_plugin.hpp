@@ -73,16 +73,17 @@ namespace gazebo
     protected: unsigned int width, height, depth;
     protected: string format;
 
-    protected: sensors::CameraSensorPtr parentSensor;
+    protected: sensors::CameraSensorPtr parentCameraSensor;
     protected: rendering::CameraPtr camera;
     // interpolate start time and end time between frames
     protected: ros::Time last_time_, current_time_;
 
     // depth camera sensor and depth image
-    protected: sensors::DepthCameraSensorPtr parentDepthCamera;
+    protected: sensors::DepthCameraSensorPtr parentDepthSensor;
+    protected: rendering::DepthCameraPtr depthCamera;
     protected: const float* curr_dep_img_;
 
-    private: event::ConnectionPtr newFrameConnection;
+    private: event::ConnectionPtr cameraUpdateConnection, depthUpdateConnection;
 
     protected: ros::NodeHandle node_handle_;
     protected: ros::Publisher event_pub_;
@@ -106,10 +107,13 @@ namespace gazebo
     private:
       void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
 
-    private: void processDelta(Mat *last_image, Mat *curr_image, vector<sensor_msgs::Imu> *imu_msgs, vector<dvs_msgs::Event> *events);
+    private: void processDelta(Mat *last_image, Mat *curr_image, vector<dvs_msgs::Event> *events);
     private: void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
     private: void publishEvents(vector<dvs_msgs::Event> *events);
-    // private: void EsimProcess(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float * depthImage, const float current_time, const float last_time);
+    private: 
+      void depthCallback();
+      void cameraCallback();
+      // private: void EsimProcess(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float * depthImage, const float current_time, const float last_time);
   };
 }
 #endif

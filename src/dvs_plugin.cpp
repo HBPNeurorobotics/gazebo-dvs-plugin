@@ -54,6 +54,7 @@
 #include <gazebo/rendering/Camera.hh>
 #include <gazebo/util/system.hh>
 #include <gazebo/sensors/DepthCameraSensor.hh>
+#include <gazebo/rendering/DepthCamera.hh>
 
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
@@ -83,7 +84,7 @@ namespace gazebo
     this->imu_msgs_ = {};
 
     velocity_x = velocity_y = velocity_z = 0.0;
-    angular_velocity_x = angular_velocity_y = angular_velocity_z = 0;
+    angular_velocity_x = angular_velocity_y = angular_velocity_z = 0.0;
 
     // store the t1 and t2 for two immediate frames.
     this->current_time_ = ros::Time::now();
@@ -94,7 +95,7 @@ namespace gazebo
   // Destructor
   DvsPlugin::~DvsPlugin()
   {
-    this->parentSensor.reset();
+    this->parentCameraSensor.reset();
     this->camera.reset();
   }
 
@@ -105,14 +106,20 @@ namespace gazebo
       gzerr << "Invalid sensor pointer." << endl;
 
 #if GAZEBO_MAJOR_VERSION >= 7
-    this->parentSensor = std::dynamic_pointer_cast<sensors::CameraSensor>(_sensor);
-    this->camera = this->parentSensor->Camera();
+    // Get the parent camera sensor
+    this->parentCameraSensor = std::dynamic_pointer_cast<gazebo::sensors::CameraSensor>(_sensor);
+    // Get the parent depth camera sensor
+    this->parentDepthSensor = std::dynamic_pointer_cast<gazebo::sensors::DepthCameraSensor>(_sensor);
+    this->camera = this->parentCameraSensor->Camera();
+    this->depthCamera = this->parentDepthSensor->DepthCamera();
 #else
-    this->parentSensor = boost::dynamic_pointer_cast<sensors::CameraSensor>(_sensor);
-    this->camera = this->parentSensor->GetCamera();
+    this->parentCameraSensor = boost::dynamic_pointer_cast<sensors::CameraSensor>(_sensor);
+    this->parentDepthSensor = boost::dynamic_pointer_cast<sensors::DepthCameraSensor>(_sensor);
+    this->camera = this->parentCameraSensor->GetCamera();
+    this->depthCamera = this->parentDepthSensor->GetDepthCamera();
 #endif
 
-    if (!this->parentSensor)
+    if (!this->parentCameraSensor)
     {
       gzerr << "DvsPlugin not attached to a camera sensor." << endl;
       return;
@@ -160,10 +167,26 @@ namespace gazebo
 
     event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 10, true);
 
-    this->newFrameConnection = this->camera->ConnectNewImageFrame(
-        boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
+    // this->newFrameConnection = this->camera->ConnectNewImageFrame(
+    //     boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
 
-    this->parentSensor->SetActive(true);
+    // this->newDepthFrameConnection = this->depthCamera->ConnectNewDepthFrame(boost::bind(&DvsPlugin::depthCallback, this, _1, this->width, this->height, this->depth, this->format));
+
+    // Connect to the updated events
+    this->cameraUpdateConnection = this->parentCameraSensor->ConnectUpdated(std::bind(&DvsPlugin::cameraCallback, this));
+    this->depthUpdateConnection = this->parentDepthSensor->ConnectUpdated(std::bind(&DvsPlugin::depthCallback, this));
+
+    // Make sure the parent sensors are valid
+    if (!this->parentCameraSensor || !this->parentDepthSensor)
+    {
+      gzerr << "Couldn't find a parent CameraSensor or DepthCameraSensor\n";
+      return;
+    }
+
+    // Make sure the parent sensors are active
+    this->parentCameraSensor->SetActive(true);
+    this->parentDepthSensor->SetActive(true);
+
 
     this->imu_sub_ = this->node_handle_.subscribe("/iris/imu", 1000, &DvsPlugin::imuCallback, this);
 
@@ -184,8 +207,9 @@ namespace gazebo
     _image = this->camera->GetImageData(0);
 #endif
     // add DepthCameraSensor to get the depth image
-    this->parentDepthCamera->Update(true);
-    this->curr_dep_img_ = this->parentDepthCamera->DepthData();
+    // this->DepthCamera->Update(true);
+    // this->curr_dep_img_ = this->DepthCamera->DepthData();
+    // this->curr_dep_img_ = nullptr;
     this->current_time_ = ros::Time::now();
 
     /*
@@ -212,7 +236,7 @@ float dt = 1.0 / rate;
 
     // convert to log intensity
     input_image.forEach<float>([](float &p, const int *position)
-                                { p = std::log(1e-4 + static_cast<float>(p)); });
+                               { p = std::log(1e-4 + p); });
 
     cv::Mat curr_image = input_image;
 
@@ -232,10 +256,10 @@ float dt = 1.0 / rate;
     if (this->has_last_image)
     {
       std::vector<dvs_msgs::Event> events;
-      // this->processDelta(&this->last_image, &curr_image, &this->imu_msgs_, &events);
+      // this->processDelta(&this->last_image, &curr_image,  &events);
 
       Esim::simulateESIM(&this->last_image, &curr_image, this->imu_msgs_, &events,
-                        this->curr_dep_img_, this->current_time_, this->last_time_);
+                         this->curr_dep_img_, this->current_time_, this->last_time_);
 
       this->publishEvents(&events);
       this->imu_msgs_.clear();
@@ -243,7 +267,6 @@ float dt = 1.0 / rate;
     else if (curr_image.size().area() > 0)
     {
       this->last_image = curr_image;
-
       // this->last_dep_img_ = this->curr_dep_img_;
       this->has_last_image = true;
       // clear all the items in tunnel for a next step storing.
@@ -256,7 +279,7 @@ float dt = 1.0 / rate;
     }
   }
 
-  void DvsPlugin::processDelta(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> *imu_msgs, std::vector<dvs_msgs::Event> *events)
+  void DvsPlugin::processDelta(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events)
   {
     if (curr_image->size() == last_image->size())
     {
@@ -334,5 +357,26 @@ float dt = 1.0 / rate;
     // push the imu messages in the tunnel.
     this->imu_msgs_.push_back(*msg);
     // this->imu_pub_.publish(this->latest_imu_msg_);
+    ROS_INFO("IMU data received");
+  }
+
+  void DvsPlugin::depthCallback()
+  {
+    // Get the depth data
+    this->curr_dep_img_ = this->depthCamera->DepthData();
+
+    // Now depthData is a pointer to the depth data array. The size of this array
+    // is equal to the width times the height of the image. Each value in this array
+    // is the depth (in meters) from the camera to the nearest object.
+  }
+
+  void DvsPlugin::cameraCallback()
+  {
+    // Get the camera data
+    const unsigned char *imageData = this->parentCameraSensor->ImageData();
+
+    // Now imageData is a pointer to the image data array. The size of this array
+    // is equal to the width times the height times the depth of the image. Each value in this array
+    // is the intensity of a pixel in the image.
   }
 }
