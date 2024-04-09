@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
+
+set(CMAKE_PROJECT_VERSION 1.0.0)
 project(gazebo_dvs_plugin)
 
 find_package(catkin REQUIRED COMPONENTS
@@ -7,6 +9,9 @@ find_package(catkin REQUIRED COMPONENTS
   dvs_msgs
   roscpp
   cv_bridge
+  roscpp
+  rospy
+  sensor_msgs
 )
 
 find_package(gazebo REQUIRED)
@@ -21,6 +26,9 @@ catkin_package(
     roscpp
     dvs_msgs
     cv_bridge
+    roscpp
+    rospy
+    sensor_msgs
 )
 
 ###########

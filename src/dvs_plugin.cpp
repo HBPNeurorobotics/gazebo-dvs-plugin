@@ -56,6 +56,7 @@
 
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
+#include <tf/tf.h>
 
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
@@ -86,6 +87,7 @@ namespace gazebo
     this->camera.reset();
   }
 
+  // load funtion provide the api for `roslaunch` to execute. It just need a subscriber to accquire the exists sensors' data.
   void DvsPlugin::Load(sensors::SensorPtr _sensor, sdf::ElementPtr _sdf)
   {
     if (!_sensor)
@@ -122,35 +124,47 @@ namespace gazebo
     else
       gzwarn << "[gazebo_ros_dvs_camera] Please specify a robotNamespace." << endl;
 
-    node_handle_ = ros::NodeHandle(namespace_);
 
     string sensorName = "";
-    if (_sdf->HasElement("cameraName"))
-      sensorName = _sdf->GetElement("cameraName")->Get<std::string>() + "/";
+    if (_sdf->HasElement("sensorName"))
+      sensorName = _sdf->GetElement("sensorName")->Get<std::string>() + "/";
     else
-      gzwarn << "[gazebo_ros_dvs_camera] Please specify a cameraName." << endl;
+      gzwarn << "[gazebo_ros_dvs_camera] Please specify a sensorName." << endl;
 
-    string topicName = "events";
+    string eventName = "events";
     if (_sdf->HasElement("eventsTopicName"))
-      topicName = _sdf->GetElement("eventsTopicName")->Get<std::string>();
+      eventName = _sdf->GetElement("eventsTopicName")->Get<std::string>();
 
-    const string topic = sensorName + topicName;
+    const string eventTopic = sensorName + eventName;
+
+    string imuName = "imu";
+    if (_sdf->HasElement("imuTopicName"))
+      imuName = _sdf->GetElement("imusTopicName")->Get<std::string>();
+
+    const string imuTopic = sensorName + imuName;
 
     if (_sdf->HasElement("eventThreshold"))
       this->event_threshold = _sdf->GetElement("eventThreshold")->Get<float>();
     else
       gzwarn << "[gazebo_ros_dvs_camera] Please specify a DVS threshold." << endl;
 
-    event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(topic, 10, 10.0);
+    event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 10, true);
 
     this->newFrameConnection = this->camera->ConnectNewImageFrame(
         boost::bind(&DvsPlugin::OnNewFrame, this, _1, this->width, this->height, this->depth, this->format));
 
     this->parentSensor->SetActive(true);
+
+
+    this->imu_sub_ = this->node_handle_.subscribe("/iris/imu", 1000, &DvsPlugin::imuCallback, this);
+
+    // Initialize the publisher that publishes the IMU data
+    this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
   }
 
   ////////////////////////////////////////////////////////////////////////////////
   // Update the controller
+  // actually this funtion is the main part of dvs_plugin
   void DvsPlugin::OnNewFrame(const unsigned char *_image,
       unsigned int _width, unsigned int _height, unsigned int _depth,
       const std::string &_format)
@@ -261,6 +275,7 @@ float dt = 1.0 / rate;
     }
   }
 
+
   void DvsPlugin::publishEvents(std::vector<dvs_msgs::Event> *events)
   {
     if (events->size() > 0)
@@ -277,5 +292,14 @@ float dt = 1.0 / rate;
 
       event_pub_.publish(msg);
     }
+  }
+
+  // Callback function for the IMU subscriber
+  void DvsPlugin::imuCallback(const sensor_msgs::Imu::ConstPtr &msg)
+  {
+    // Store the latest IMU data
+    this->latest_imu_msg_ = *msg;
+    // Publish the latest IMU data
+    this->imu_pub_.publish(this->latest_imu_msg_);
   }
 }

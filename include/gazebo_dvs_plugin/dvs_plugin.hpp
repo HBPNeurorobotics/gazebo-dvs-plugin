@@ -45,6 +45,7 @@
 #include <gazebo/util/system.hh>
 
 
+#include <sensor_msgs/Imu.h>
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 #include <opencv2/opencv.hpp>
@@ -77,10 +78,16 @@ namespace gazebo
     protected: ros::NodeHandle node_handle_;
     protected: ros::Publisher event_pub_;
     protected: string namespace_;
+    
+    // for imu data accquisition
+    protected: ros::Subscriber imu_sub_;
+    protected: ros::Publisher imu_pub_;
+    protected: sensor_msgs::Imu latest_imu_msg_;
 
     private: Mat last_image;
     private: bool has_last_image;
     private: float event_threshold;
+    private: void imuCallback(const sensor_msgs::Imu::ConstPtr& msg);
     private: void processDelta(Mat *last_image, Mat *curr_image);
     private: void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
     private: void publishEvents(vector<dvs_msgs::Event> *events);
