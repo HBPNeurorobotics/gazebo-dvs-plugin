@@ -53,17 +53,19 @@
 #include <gazebo/sensors/CameraSensor.hh>
 #include <gazebo/rendering/Camera.hh>
 #include <gazebo/util/system.hh>
+#include <gazebo/sensors/DepthCameraSensor.hh>
 
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 #include <tf/tf.h>
+#include <cmath>
 
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
 
 #include <gazebo_dvs_plugin/dvs_plugin.hpp>
-
+#include <gazebo_dvs_plugin/esim.hpp>
 using namespace std;
 using namespace cv;
 
@@ -72,11 +74,20 @@ namespace gazebo
   // Register this plugin with the simulator
   GZ_REGISTER_SENSOR_PLUGIN(DvsPlugin)
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Constructor
-    DvsPlugin::DvsPlugin()
-    : SensorPlugin(), width(0), height(0), depth(0), has_last_image(false)
+  ////////////////////////////////////////////////////////////////////////////////
+  // Constructor
+  DvsPlugin::DvsPlugin()
+      : SensorPlugin(), width(0), height(0), depth(0), has_last_image(false)
   {
+    // initialize the message tunnel.
+    this->imu_msgs_ = {};
+
+    velocity_x = velocity_y = velocity_z = 0.0;
+    angular_velocity_x = angular_velocity_y = angular_velocity_z = 0;
+
+    // store the t1 and t2 for two immediate frames.
+    this->current_time_ = ros::Time::now();
+    this->last_time_ = ros::Time::now();
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -124,7 +135,6 @@ namespace gazebo
     else
       gzwarn << "[gazebo_ros_dvs_camera] Please specify a robotNamespace." << endl;
 
-
     string sensorName = "";
     if (_sdf->HasElement("sensorName"))
       sensorName = _sdf->GetElement("sensorName")->Get<std::string>() + "/";
@@ -151,10 +161,9 @@ namespace gazebo
     event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 10, true);
 
     this->newFrameConnection = this->camera->ConnectNewImageFrame(
-        boost::bind(&DvsPlugin::OnNewFrame, this, _1, this->width, this->height, this->depth, this->format));
+        boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
 
     this->parentSensor->SetActive(true);
-
 
     this->imu_sub_ = this->node_handle_.subscribe("/iris/imu", 1000, &DvsPlugin::imuCallback, this);
 
@@ -165,15 +174,19 @@ namespace gazebo
   ////////////////////////////////////////////////////////////////////////////////
   // Update the controller
   // actually this funtion is the main part of dvs_plugin
-  void DvsPlugin::OnNewFrame(const unsigned char *_image,
-      unsigned int _width, unsigned int _height, unsigned int _depth,
-      const std::string &_format)
+  void DvsPlugin::mainCallback(const unsigned char *_image,
+                               unsigned int _width, unsigned int _height, unsigned int _depth,
+                               const std::string &_format)
   {
 #if GAZEBO_MAJOR_VERSION >= 7
     _image = this->camera->ImageData(0);
 #else
     _image = this->camera->GetImageData(0);
 #endif
+    // add DepthCameraSensor to get the depth image
+    this->parentDepthCamera->Update(true);
+    this->curr_dep_img_ = this->parentDepthCamera->DepthData();
+    this->current_time_ = ros::Time::now();
 
     /*
 #if GAZEBO_MAJOR_VERSION >= 7
@@ -188,36 +201,54 @@ float dt = 1.0 / rate;
 
     // convert given frame to opencv image
     cv::Mat input_image(_height, _width, CV_8UC3);
-    input_image.data = (uchar*)_image;
+    input_image.data = (uchar *)_image;
 
     // color to grayscale
     cv::Mat curr_image_rgb(_height, _width, CV_8UC3);
     cvtColor(input_image, curr_image_rgb, CV_RGB2BGR);
     cvtColor(curr_image_rgb, input_image, CV_BGR2GRAY);
 
+    input_image.convertTo(input_image, CV_32F);
+
+    // convert to log intensity
+    input_image.forEach<float>([](float &p, const int *position)
+                                { p = std::log(1e-4 + static_cast<float>(p)); });
+
     cv::Mat curr_image = input_image;
 
-/* TODO any encoding configuration should be supported
-    try {
-      cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(*_image, sensor_msgs::image_encodings::BGR8);
-      std::cout << "Image: " << std::endl << " " << cv_ptr->image << std::endl << std::endl;
-    }
-    catch (cv_bridge::Exception& e)
-    {
-      ROS_ERROR("cv_bridge exception %s", e.what());
-      std::cout << "ERROR";
-    }
-*/
+    /* TODO any encoding configuration should be supported
+        try {
+          cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(*_image, sensor_msgs::image_encodings::BGR8);
+          std::cout << "Image: " << std::endl << " " << cv_ptr->image << std::endl << std::endl;
+        }
+        catch (cv_bridge::Exception& e)
+        {
+          ROS_ERROR("cv_bridge exception %s", e.what());
+          std::cout << "ERROR";
+        }
+    */
 
     assert(_height == height && _width == width);
     if (this->has_last_image)
     {
-      this->processDelta(&this->last_image, &curr_image);
+      std::vector<dvs_msgs::Event> events;
+      // this->processDelta(&this->last_image, &curr_image, &this->imu_msgs_, &events);
+
+      Esim::simulateESIM(&this->last_image, &curr_image, this->imu_msgs_, &events,
+                        this->curr_dep_img_, this->current_time_, this->last_time_);
+
+      this->publishEvents(&events);
+      this->imu_msgs_.clear();
     }
     else if (curr_image.size().area() > 0)
     {
       this->last_image = curr_image;
+
+      // this->last_dep_img_ = this->curr_dep_img_;
       this->has_last_image = true;
+      // clear all the items in tunnel for a next step storing.
+      this->imu_msgs_.clear();
+      this->last_time_ = this->current_time_;
     }
     else
     {
@@ -225,7 +256,7 @@ float dt = 1.0 / rate;
     }
   }
 
-  void DvsPlugin::processDelta(cv::Mat *last_image, cv::Mat *curr_image)
+  void DvsPlugin::processDelta(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> *imu_msgs, std::vector<dvs_msgs::Event> *events)
   {
     if (curr_image->size() == last_image->size())
     {
@@ -273,8 +304,8 @@ float dt = 1.0 / rate;
         events->push_back(event);
       }
     }
+    Esim::fillEvents(mask, polarity, events);
   }
-
 
   void DvsPlugin::publishEvents(std::vector<dvs_msgs::Event> *events)
   {
@@ -298,8 +329,10 @@ float dt = 1.0 / rate;
   void DvsPlugin::imuCallback(const sensor_msgs::Imu::ConstPtr &msg)
   {
     // Store the latest IMU data
-    this->latest_imu_msg_ = *msg;
+    // this->latest_imu_msg_ = *msg;
     // Publish the latest IMU data
-    this->imu_pub_.publish(this->latest_imu_msg_);
+    // push the imu messages in the tunnel.
+    this->imu_msgs_.push_back(*msg);
+    // this->imu_pub_.publish(this->latest_imu_msg_);
   }
 }

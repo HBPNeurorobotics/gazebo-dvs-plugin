@@ -37,6 +37,7 @@
 #define DVS_PLUGIN_HPP
 
 #include <string>
+#include <vector>
 #include <ros/ros.h>
 
 #include <gazebo/common/Plugin.hh>
@@ -49,6 +50,8 @@
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 #include <opencv2/opencv.hpp>
+// #include <gazebo_dvs_plugin/esim.hpp>
+#include <tf/transform_datatypes.h>
 
 using namespace std;
 using namespace cv;
@@ -63,7 +66,7 @@ namespace gazebo
 
     public: void Load(sensors::SensorPtr _parent, sdf::ElementPtr _sdf);
 
-    protected: virtual void OnNewFrame(const unsigned char *_image,
+    protected: virtual void mainCallback(const unsigned char *_image,
                    unsigned int _width, unsigned int _height,
                    unsigned int _depth, const string &_format);
 
@@ -72,6 +75,12 @@ namespace gazebo
 
     protected: sensors::CameraSensorPtr parentSensor;
     protected: rendering::CameraPtr camera;
+    // interpolate start time and end time between frames
+    protected: ros::Time last_time_, current_time_;
+
+    // depth camera sensor and depth image
+    protected: sensors::DepthCameraSensorPtr parentDepthCamera;
+    protected: const float* curr_dep_img_;
 
     private: event::ConnectionPtr newFrameConnection;
 
@@ -82,15 +91,25 @@ namespace gazebo
     // for imu data accquisition
     protected: ros::Subscriber imu_sub_;
     protected: ros::Publisher imu_pub_;
-    protected: sensor_msgs::Imu latest_imu_msg_;
+    // protected: sensor_msgs::Imu latest_imu_msg_;
+    // store a sequence of imu messages for ESIM computing.
+    protected: std::vector<sensor_msgs::Imu> imu_msgs_;
+    protected:
+      float velocity_x, velocity_y, velocity_z;
+      float angular_velocity_x, angular_velocity_y, angular_velocity_z;
 
     private: Mat last_image;
     private: bool has_last_image;
     private: float event_threshold;
-    private: void imuCallback(const sensor_msgs::Imu::ConstPtr& msg);
-    private: void processDelta(Mat *last_image, Mat *curr_image);
+    
+
+    private:
+      void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
+
+    private: void processDelta(Mat *last_image, Mat *curr_image, vector<sensor_msgs::Imu> *imu_msgs, vector<dvs_msgs::Event> *events);
     private: void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
     private: void publishEvents(vector<dvs_msgs::Event> *events);
+    // private: void EsimProcess(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float * depthImage, const float current_time, const float last_time);
   };
 }
 #endif
