@@ -50,8 +50,6 @@
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 #include <opencv2/opencv.hpp>
-// #include <gazebo_dvs_plugin/esim.hpp>
-#include <tf/transform_datatypes.h>
 
 using namespace std;
 using namespace cv;
@@ -78,19 +76,17 @@ namespace gazebo
     // interpolate start time and end time between frames
     protected: ros::Time last_time_, current_time_;
 
-    // depth camera sensor and depth image
-    protected: const float* curr_dep_img_;
-
-    private: event::ConnectionPtr cameraUpdateConnection;
+    private: event::ConnectionPtr newFrameConnection;
 
     protected: ros::NodeHandle node_handle_;
     protected: ros::Publisher event_pub_;
     protected: string namespace_;
     
-    // for imu data accquisition
+    // for imu and depth data accquisition
     protected: ros::Subscriber imu_sub_, dep_sub_;
     protected: ros::Publisher imu_pub_, dep_pub_;
-    // protected: sensor_msgs::Imu latest_imu_msg_;
+     // depth image
+    protected: sensor_msgs::Image dep_img_;
     // store a sequence of imu messages for ESIM computing.
     protected: std::vector<sensor_msgs::Imu> imu_msgs_;
 
@@ -101,13 +97,10 @@ namespace gazebo
 
     private:
       void imuCallback(const sensor_msgs::Imu::ConstPtr &msg);
-
-    private: void processDelta(Mat *last_image, Mat *curr_image, vector<dvs_msgs::Event> *events);
-    private: void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
-    private: void publishEvents(vector<dvs_msgs::Event> *events);
-    private: 
-      void depthCallback();
-      void cameraCallback();
+      void processDelta(Mat *last_image, Mat *curr_image, vector<dvs_msgs::Event> *events);
+      void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
+      void publishEvents(vector<dvs_msgs::Event> *events);
+      void depthCallback(const sensor_msgs::ImageConstPtr &msg);
       // private: void EsimProcess(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float * depthImage, const float current_time, const float last_time);
   };
 }

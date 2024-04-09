@@ -103,9 +103,7 @@ namespace gazebo
       gzerr << "Invalid sensor pointer." << endl;
 
 #if GAZEBO_MAJOR_VERSION >= 7
-    // Get the parent camera sensor
     this->parentCameraSensor = std::dynamic_pointer_cast<gazebo::sensors::CameraSensor>(_sensor);
-    // Get the parent depth camera sensor
     this->camera = this->parentCameraSensor->Camera();
 #else
     this->parentCameraSensor = boost::dynamic_pointer_cast<sensors::CameraSensor>(_sensor);
@@ -163,16 +161,15 @@ namespace gazebo
     this->newFrameConnection = this->camera->ConnectNewImageFrame(
         boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
 
-
     // Make sure the parent sensors are active
     this->parentCameraSensor->SetActive(true);
 
-
-    this->imu_sub_ = this->node_handle_.subscribe("/iris/imu", 1000, &DvsPlugin::imuCallback, this);
-
+    this->imu_sub_ = this->node_handle_.subscribe("/camera/imu", 1000, &DvsPlugin::imuCallback, this);
+    this->dep_sub_ = this->node_handle_.subscribe("/camera/depth/image_raw", 1000, &DvsPlugin::depthCallback, this);
 
     // Initialize the publisher that publishes the IMU data
     this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
+    this->dep_pub_ = this->node_handle_.advertise<sensor_msgs::Image>("/depth/image_raw", 1000);
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -188,9 +185,6 @@ namespace gazebo
     _image = this->camera->GetImageData(0);
 #endif
     // add DepthCameraSensor to get the depth image
-    // this->DepthCamera->Update(true);
-    // this->curr_dep_img_ = this->DepthCamera->DepthData();
-    // this->curr_dep_img_ = nullptr;
     this->current_time_ = ros::Time::now();
 
     /*
@@ -237,10 +231,9 @@ float dt = 1.0 / rate;
     if (this->has_last_image)
     {
       std::vector<dvs_msgs::Event> events;
-      // this->processDelta(&this->last_image, &curr_image,  &events);
-
-      Esim::simulateESIM(&this->last_image, &curr_image, this->imu_msgs_, &events,
-                         this->curr_dep_img_, this->current_time_, this->last_time_);
+      this->processDelta(&this->last_image, &curr_image,  &events);
+      // Esim::simulateESIM(&this->last_image, &curr_image, this->imu_msgs_, &events,
+      //                    this->dep_img_, this->current_time_, this->last_time_);
 
       this->publishEvents(&events);
       this->imu_msgs_.clear();
@@ -248,7 +241,6 @@ float dt = 1.0 / rate;
     else if (curr_image.size().area() > 0)
     {
       this->last_image = curr_image;
-      // this->last_dep_img_ = this->curr_dep_img_;
       this->has_last_image = true;
       // clear all the items in tunnel for a next step storing.
       this->imu_msgs_.clear();
@@ -308,7 +300,6 @@ float dt = 1.0 / rate;
         events->push_back(event);
       }
     }
-    Esim::fillEvents(mask, polarity, events);
   }
 
   void DvsPlugin::publishEvents(std::vector<dvs_msgs::Event> *events)
@@ -338,26 +329,16 @@ float dt = 1.0 / rate;
     // push the imu messages in the tunnel.
     this->imu_msgs_.push_back(*msg);
     // this->imu_pub_.publish(this->latest_imu_msg_);
-    ROS_INFO("IMU data received");
+    // ROS_INFO("IMU data received");
   }
 
-  void DvsPlugin::depthCallback()
+  void DvsPlugin::depthCallback(const sensor_msgs::ImageConstPtr &msg)
   {
     // Get the depth data
-    this->curr_dep_img_ = this->depthCamera->DepthData();
-
+    // this->curr_dep_img_ = this->depthCamera->DepthData();
+    this->dep_img_ = *msg;
     // Now depthData is a pointer to the depth data array. The size of this array
     // is equal to the width times the height of the image. Each value in this array
     // is the depth (in meters) from the camera to the nearest object.
-  }
-
-  void DvsPlugin::cameraCallback()
-  {
-    // Get the camera data
-    const unsigned char *imageData = this->parentCameraSensor->ImageData();
-
-    // Now imageData is a pointer to the image data array. The size of this array
-    // is equal to the width times the height times the depth of the image. Each value in this array
-    // is the intensity of a pixel in the image.
   }
 }
