@@ -38,35 +38,8 @@
  * https://github.com/PX4/sitl_gazebo/blob/master/src/gazebo_opticalFlow_plugin.cpp
  */
 
-#ifdef _WIN32
-// Ensure that Winsock2.h is included before Windows.h, which can get
-// pulled in by anybody (e.g., Boost).
-#include <Winsock2.h>
-#endif
-
-#include <string>
-
-#include <ros/ros.h>
-#include <ros/console.h>
-
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/sensors/CameraSensor.hh>
-#include <gazebo/rendering/Camera.hh>
-#include <gazebo/util/system.hh>
-#include <gazebo/sensors/DepthCameraSensor.hh>
-#include <gazebo/rendering/DepthCamera.hh>
-
-#include <dvs_msgs/Event.h>
-#include <dvs_msgs/EventArray.h>
-#include <tf/tf.h>
-#include <cmath>
-
-#include <opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.h>
-#include <sensor_msgs/image_encodings.h>
-
 #include <gazebo_dvs_plugin/dvs_plugin.hpp>
-#include <gazebo_dvs_plugin/esim.hpp>
+
 using namespace std;
 using namespace cv;
 
@@ -80,12 +53,10 @@ namespace gazebo
   DvsPlugin::DvsPlugin()
       : SensorPlugin(), width(0), height(0), depth(0), has_last_image(false)
   {
-    // initialize the message tunnel.
-    this->imu_msgs_ = {};
-
     // store the t1 and t2 for two immediate frames.
     this->current_time_ = ros::Time::now();
     this->last_time_ = ros::Time::now();
+    this->esim = Esim();
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -207,12 +178,6 @@ float dt = 1.0 / rate;
     cvtColor(input_image, curr_image_rgb, CV_RGB2BGR);
     cvtColor(curr_image_rgb, input_image, CV_BGR2GRAY);
 
-    input_image.convertTo(input_image, CV_32F);
-
-    // convert to log intensity
-    input_image.forEach<float>([](float &p, const int *position)
-                               { p = std::log(1e-4 + p); });
-
     cv::Mat curr_image = input_image;
 
     /* TODO any encoding configuration should be supported
@@ -231,19 +196,18 @@ float dt = 1.0 / rate;
     if (this->has_last_image)
     {
       std::vector<dvs_msgs::Event> events;
-      this->processDelta(&this->last_image, &curr_image,  &events);
-      // Esim::simulateESIM(&this->last_image, &curr_image, this->imu_msgs_, &events,
-      //                    this->dep_img_, this->current_time_, this->last_time_);
+      // this->processDelta(&this->last_image, &curr_image,  &events);
+      esim.simulateESIM(&this->last_image, &curr_image,  &events, this->imu_msg_,this->dep_img_, this->current_time_, this->last_time_);
 
       this->publishEvents(&events);
-      this->imu_msgs_.clear();
+      // this->imu_msgs_.clear();
     }
     else if (curr_image.size().area() > 0)
     {
       this->last_image = curr_image;
       this->has_last_image = true;
       // clear all the items in tunnel for a next step storing.
-      this->imu_msgs_.clear();
+      // this->imu_msgs_.clear();
       this->last_time_ = this->current_time_;
     }
     else
@@ -324,10 +288,9 @@ float dt = 1.0 / rate;
   void DvsPlugin::imuCallback(const sensor_msgs::Imu::ConstPtr &msg)
   {
     // Store the latest IMU data
-    // this->latest_imu_msg_ = *msg;
+    this->imu_msg_ = *msg;
     // Publish the latest IMU data
     // push the imu messages in the tunnel.
-    this->imu_msgs_.push_back(*msg);
     // this->imu_pub_.publish(this->latest_imu_msg_);
     // ROS_INFO("IMU data received");
   }

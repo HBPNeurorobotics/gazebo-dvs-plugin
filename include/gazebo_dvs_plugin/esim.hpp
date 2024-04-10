@@ -38,25 +38,38 @@
 #include <ros/ros.h>
 #include <vector>
 #include <opencv2/opencv.hpp>
-#include <gazebo/common/Plugin.hh>
+#include <tf/tf.h>
 
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 
-#include <gazebo_dvs_plugin/dvs_plugin.hpp>
-
-// 这个文件不需要任何Gazebo相关的东西，只需要当作是一个接受前后两帧的图像以及两帧之间的姿态信息的仿真算法。
+#include <gazebo/sensors/DepthCameraSensor.hh>
+#include <gazebo/rendering/DepthCamera.hh>
+#include <gazebo/common/Plugin.hh>
 class GAZEBO_VISIBLE Esim
 {
 public:
-  static void fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events);
+  Esim();
+  ~Esim();
 
-  static void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float *curr_dep_img_, ros::Time &current_time, ros::Time &last_time);
+private:
+  geometry_msgs::Vector3 angular_velocity, velocity;
+  ros::Time last_time;
+  // the minimum time interval between two events for events generation
+  const float MIN_TIME_INTERVAL = 1e-7;
 
-  static void egoVelocity(const float Z, const float u, const float v, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, std::vector<float> &B);
+public:
+  void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, ros::Time &current_time, ros::Time &last_time);
 
-  static void lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time);
+private:
+  void egoVelocity(const float Z, const float u, const float v, float *B);
 
-  static void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, const geometry_msgs::Vector3 &velocity, const geometry_msgs::Vector3 &angular_velocity, float *min_t_v, float *min_t_b);
+  void lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time, float *delta_l);
+
+  void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, double *min_t_v, double *min_t_b);
+
+  void fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events);
 };

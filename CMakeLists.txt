@@ -51,6 +51,7 @@ include_directories(
 
 add_library(${PROJECT_NAME}
     src/dvs_plugin.cpp
+    src/esim.cpp
 )
 add_dependencies(${PROJECT_NAME}
     ${catkin_EXPORTED_TARGETS}
