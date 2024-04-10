@@ -49,27 +49,34 @@
 #include <gazebo/sensors/DepthCameraSensor.hh>
 #include <gazebo/rendering/DepthCamera.hh>
 #include <gazebo/common/Plugin.hh>
+#include <iostream>
+
 class GAZEBO_VISIBLE Esim
 {
 public:
-  Esim();
-  ~Esim();
+  float event_threshold;
+  // the minimum time interval between two events for events generation
+  static constexpr float MIN_TIME_INTERVAL = 1e-7;
 
 private:
   geometry_msgs::Vector3 angular_velocity, velocity;
   ros::Time last_time;
-  // the minimum time interval between two events for events generation
-  const float MIN_TIME_INTERVAL = 1e-7;
 
 public:
+  Esim();
+  ~Esim();
   void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, ros::Time &current_time, ros::Time &last_time);
 
 private:
   void egoVelocity(const float Z, const float u, const float v, float *B);
 
-  void lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time, float *delta_l);
+  void lightChange(const float last_pixel, const float curr_pixel, const float f_time_interval, float *delta_pixel);
 
-  void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, double *min_t_v, double *min_t_b);
+  void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *min_t_v, float *min_t_b);
 
-  void fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events);
+  void processDelta(cv::Mat *last_image, const cv::Mat *curr_image, const float event_threshold, std::vector<dvs_msgs::Event> *events);
+
+  void fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events);
+
+  void _debug_fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events);
 };

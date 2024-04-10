@@ -34,7 +34,7 @@
 #include <gazebo_dvs_plugin/esim.hpp>
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor
-Esim::Esim()
+Esim::Esim() : event_threshold(10.0)
 {
   velocity.x = 0;
   velocity.y = 0;
@@ -55,16 +55,16 @@ void Esim::simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dv
   *last_image += 1e-4;
   *curr_image += 1e-4;
 
+  float f_time_interval = current_time.toSec() - last_time.toSec();
   // convert the image to float
 
   last_image->convertTo(*last_image, CV_32F);
   curr_image->convertTo(*curr_image, CV_32F);
 
-  // convert to log intensity
-  cv::log(*last_image, *last_image);
-  cv::log(*curr_image, *curr_image);
   // get the imu and depth messages
 
+  // cv::log(*last_image, *last_image);
+  // cv::log(*curr_image, *curr_image);
   assert(msg_dep_img.encoding == sensor_msgs::image_encodings::TYPE_32FC1);
   // convert the depth image from senso::Image to float
   assert(msg_dep_img.data.size() % sizeof(float) == 0);
@@ -87,33 +87,78 @@ void Esim::simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dv
   this->angular_velocity.y = imu_msg.angular_velocity.y;
   this->angular_velocity.z = imu_msg.angular_velocity.z;
 
-  double min_t_v, min_t_b;
-  this->adaptiveSample(last_image, curr_image, depth_image, current_time, last_time, &min_t_v, &min_t_b);
-  double lambda_b = 0.5, lambda_v = 0.5;
+  float min_t_v, min_t_b;
+  this->adaptiveSample(last_image, curr_image, depth_image, f_time_interval, &min_t_v, &min_t_b);
+  float lambda_b = 0.5, lambda_v = 0.5;
   // the sample interval between two events for events generation is 1 us.
-  double t_sample_interval = std::max(this->MIN_TIME_INTERVAL, lambda_b * min_t_b + lambda_v * min_t_v);
-  
-
-  this->fillEvents(static_cast<int>(min_t_b*1e9), static_cast<int>(min_t_v*1e9), current_time, 1, events);
+  float t_sample_interval = std::max(MIN_TIME_INTERVAL, lambda_b * min_t_b + lambda_v * min_t_v);
+  // caculate the slope matrix between the two frames
+  cv::Mat slope = cv::Mat::zeros(last_image->rows, last_image->cols, CV_32F);
+  slope.forEach<float>([&](float &pixel, const int *position) -> void
+                       { this->lightChange(last_image->at<float>(position[0], position[1]),
+                                           curr_image->at<float>(position[0], position[1]),
+                                           f_time_interval,
+                                           &pixel); });
+  cv::Mat last_image_, curr_image_;
+  // convert to log intensity to store the last time after event was created
+  // cv::log(*last_image, last_image_);
+  last_image_ = last_image->clone();
+  // use linear interpolation between the two frames.
+  // add 1 means this function should be executed at least once.
+  // for (uint64_t iter_num = 0; iter_num < static_cast<uint64_t>(f_time_interval / t_sample_interval) + 1; iter_num++)
+  // {
+    // convert to log intensity to store the current image during the interpolation
+    // cv::log(*last_image + slope * t_sample_interval, curr_image_);
+    curr_image_ = *last_image + slope * f_time_interval;
+    // this->processDelta(&last_image_, &curr_image_, this->event_threshold, events);
+    this->processDelta(last_image, curr_image, this->event_threshold, events);
+  // }
+  // for debug only
+  // this->_debug_fillEvents(static_cast<int>(f_time_interval * 1e9), static_cast<int>(t_sample_interval * 1e9), current_time, 1, events);
 }
 
+// last_image : the last time after event was created
+// curr_image : the current image
+// this function will change the last_image in accordance with events activation after the event was created
+void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, const float event_threshold, std::vector<dvs_msgs::Event> *events)
+{
+  if (curr_image->size() == last_image->size())
+  {
+    cv::Mat pos_diff = *curr_image - *last_image;
+    cv::Mat neg_diff = *last_image - *curr_image;
+
+    cv::Mat pos_mask;
+    cv::Mat neg_mask;
+
+    cv::threshold(pos_diff, pos_mask, event_threshold, 255, cv::THRESH_BINARY);
+    cv::threshold(neg_diff, neg_mask, event_threshold, 255, cv::THRESH_BINARY);
+
+    // after event was created, these place where have yet activated should be set as the current value, instead of the initiated value.
+    *last_image += pos_mask & pos_diff;
+    *last_image -= neg_mask & neg_diff;
+
+    this->fillEvents(&pos_mask, 0, events);
+    this->fillEvents(&neg_mask, 1, events);
+  }
+  else
+  {
+    std::cout << "Unexpected change in image size (" << last_image->size() << " -> " << curr_image->size() << "). Publishing no events for this frame change." << std::endl;
+  }
+}
 void Esim::egoVelocity(const float Z, const float u, const float v, float *B)
 {
   // page 12 formula 4 for "ESIM: an Open Event Camera Simulator"
   *B = std::fabs(-1 / Z * this->velocity.x + u / Z * this->velocity.z + u * v * this->angular_velocity.x - (1 + u * u) * this->angular_velocity.y + v * this->angular_velocity.z) + std::fabs(-1 / Z * this->velocity.y + v / Z * this->velocity.z + (1 + v * v) * this->angular_velocity.x - u * v * this->angular_velocity.y - u * this->angular_velocity.z);
 }
 
-void Esim::lightChange(const float l1, const float l2, const float f_current_time, const float f_last_time, float *delta_l)
+void Esim::lightChange(const float last_pixel, const float curr_pixel, const float f_time_interval, float *delta_pixel)
 {
   // l1 and l2 are the logirithmic light intensities of the two frames
-  *delta_l = (l2 - l1) / (f_current_time - f_last_time);
+  *delta_pixel = (last_pixel - curr_pixel) / f_time_interval;
 }
 
-void Esim::adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const ros::Time &current_time, const ros::Time &last_time, double *min_t_v, double *min_t_b)
+void Esim::adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *min_t_v, float *min_t_b)
 {
-  float f_current_time = current_time.toSec();
-  float f_last_time = last_time.toSec();
-
   cv::Mat temp_image = cv::Mat::zeros(last_image->rows, last_image->cols, CV_32F);
 
   // calculate the velocity and angular velocity for the camera ego movement
@@ -124,19 +169,42 @@ void Esim::adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const 
   // calculate the light change between the two frames
   last_image->forEach<float>([&](float &l1, const int *position) -> void
                              {
-    float l2 = curr_image->at<uchar>(position[0], position[1]);
-    this->lightChange(l1, l2, f_current_time, f_last_time, &l1); });
-  double max;
+    float l2 = curr_image->at<float>(position[0], position[1]);
+    this->lightChange(l1, l2, f_time_interval, &l1); });
+  double temp_min_t_v, temp_min_t_b, max_;
   cv::Point min_loc, max_loc;
   // get the minimum value of the two
-  cv::minMaxLoc(temp_image, min_t_v, &max, &min_loc, &max_loc);
-  cv::minMaxLoc(*last_image, min_t_b, &max, &min_loc, &max_loc);
+  cv::minMaxLoc(temp_image, &temp_min_t_v, &max_, &min_loc, &max_loc);
+  cv::minMaxLoc(*last_image, &temp_min_t_b, &max_, &min_loc, &max_loc);
+
+  *min_t_v = static_cast<float>(temp_min_t_v);
+  *min_t_b = static_cast<float>(temp_min_t_b);
 }
 
 // void Esim::fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events)
-void Esim::fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events)
+void Esim::fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events)
 {
   // findNonZero fails when there are no zeros
+  // TODO is there a better workaround then iterating the binary image twice?
+  if (cv::countNonZero(*mask) != 0)
+  {
+    std::vector<cv::Point> locs;
+    cv::findNonZero(*mask, locs);
+
+    for (int i = 0; i < locs.size(); i++)
+    {
+      dvs_msgs::Event event;
+      event.x = locs[i].x;
+      event.y = locs[i].y;
+      event.ts = ros::Time::now();
+      event.polarity = polarity;
+      events->push_back(event);
+    }
+  }
+}
+
+void Esim::_debug_fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events)
+{
   dvs_msgs::Event event;
   event.x = x;
   event.y = y;

@@ -127,7 +127,7 @@ namespace gazebo
     else
       gzwarn << "[gazebo_ros_dvs_camera] Please specify a DVS threshold." << endl;
 
-    event_pub_ = node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 10, true);
+    this->event_pub_ = this->node_handle_.advertise<dvs_msgs::EventArray>(eventTopic, 1000, true);
 
     this->newFrameConnection = this->camera->ConnectNewImageFrame(
         boost::bind(&DvsPlugin::mainCallback, this, _1, this->width, this->height, this->depth, this->format));
@@ -139,8 +139,11 @@ namespace gazebo
     this->dep_sub_ = this->node_handle_.subscribe("/camera/depth/image_raw", 1000, &DvsPlugin::depthCallback, this);
 
     // Initialize the publisher that publishes the IMU data
-    this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
-    this->dep_pub_ = this->node_handle_.advertise<sensor_msgs::Image>("/depth/image_raw", 1000);
+    // this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
+    // this->dep_pub_ = this->node_handle_.advertise<sensor_msgs::Image>("/depth/image_raw", 1000);
+
+    // set the threshold for event camera
+    esim.event_threshold = this->event_threshold;
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -196,11 +199,10 @@ float dt = 1.0 / rate;
     if (this->has_last_image)
     {
       std::vector<dvs_msgs::Event> events;
-      // this->processDelta(&this->last_image, &curr_image,  &events);
-      esim.simulateESIM(&this->last_image, &curr_image,  &events, this->imu_msg_,this->dep_img_, this->current_time_, this->last_time_);
+      this->processDelta(&this->last_image, &curr_image,  &events);
+      // esim.simulateESIM(&this->last_image, &curr_image, &events, this->imu_msg_, this->dep_img_, this->current_time_, this->last_time_);
 
       this->publishEvents(&events);
-      // this->imu_msgs_.clear();
     }
     else if (curr_image.size().area() > 0)
     {
@@ -237,7 +239,7 @@ float dt = 1.0 / rate;
       this->fillEvents(&pos_mask, 0, &events);
       this->fillEvents(&neg_mask, 1, &events);
 
-      this->publishEvents(&events);
+      // this->publishEvents(&events);
     }
     else
     {
@@ -291,7 +293,6 @@ float dt = 1.0 / rate;
     this->imu_msg_ = *msg;
     // Publish the latest IMU data
     // push the imu messages in the tunnel.
-    // this->imu_pub_.publish(this->latest_imu_msg_);
     // ROS_INFO("IMU data received");
   }
 

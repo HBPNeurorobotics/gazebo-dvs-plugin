@@ -98,7 +98,7 @@ namespace gazebo
 
     // for imu and depth data accquisition
     ros::Subscriber imu_sub_, dep_sub_;
-    ros::Publisher imu_pub_, dep_pub_;
+    // ros::Publisher imu_pub_, dep_pub_;
     // depth image
     sensor_msgs::Image dep_img_;
     // store a sequence of imu messages for ESIM computing.
