@@ -49,7 +49,7 @@
 #include <gazebo/sensors/DepthCameraSensor.hh>
 #include <gazebo/rendering/DepthCamera.hh>
 #include <gazebo/common/Plugin.hh>
-#include <iostream>
+
 
 class GAZEBO_VISIBLE Esim
 {
