@@ -106,7 +106,7 @@ namespace gazebo
 
   private:
     Mat last_image;
-    bool has_last_image;
+    bool has_last_image,imu_cali_flag;
     float event_threshold;
     Esim esim;
 

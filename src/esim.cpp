@@ -34,7 +34,7 @@
 #include <gazebo_dvs_plugin/esim.hpp>
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor
-Esim::Esim() : event_threshold(10.0)
+Esim::Esim()
 {
   velocity.x = 0;
   velocity.y = 0;
@@ -43,6 +43,21 @@ Esim::Esim() : event_threshold(10.0)
   angular_velocity.y = 0;
   angular_velocity.z = 0;
   last_time = ros::Time::now();
+  event_threshold = 10.0;
+  mem_last_image = cv::Mat::ones(0, 0, CV_32F);
+}
+
+Esim::Esim(float event_threshold, int width, int height)
+{
+  velocity.x = 0;
+  velocity.y = 0;
+  velocity.z = 0;
+  angular_velocity.x = 0;
+  angular_velocity.y = 0;
+  angular_velocity.z = 0;
+  this->event_threshold = event_threshold;
+  last_time = ros::Time::now();
+  mem_last_image = cv::Mat::ones(width, height, CV_32F);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,77 +65,143 @@ Esim::Esim() : event_threshold(10.0)
 Esim::~Esim()
 {
 }
-void Esim::simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, ros::Time &current_time, ros::Time &last_time)
+
+// calibrate the static bias of the imu
+void Esim::imuCalibration(const std::vector<sensor_msgs::Imu> *imu_msgs)
 {
-  *last_image += 1e-4;
-  *curr_image += 1e-4;
+  int imu_msg_size = imu_msgs->size();
+  int amount = imu_msg_size;
+  // 使用最小二乘的回归计算偏置和倍缩，但是倍缩必须在标准速度下校准，这里做不出来，就用时漂去平替它
+  float sum_w_x = 0, sum_w_y = 0, sum_w_z = 0;
+  float sum_a_x = 0, sum_a_y = 0, sum_a_z = 0;
+  for (int i = 0; i < imu_msg_size; i++)
+  {
+    if (imu_msgs->at(i).linear_acceleration_covariance[0] < 0 || imu_msgs->at(i).angular_velocity_covariance[0] < 0)
+    {
+      amount--;
+      continue;
+    }
+    sum_w_x += imu_msgs->at(i).angular_velocity.x;
+    sum_w_y += imu_msgs->at(i).angular_velocity.y;
+    sum_w_z += imu_msgs->at(i).angular_velocity.z;
+
+    sum_a_x += imu_msgs->at(i).linear_acceleration.x;
+    sum_a_y += imu_msgs->at(i).linear_acceleration.y;
+    sum_a_z += imu_msgs->at(i).linear_acceleration.z;
+  }
+
+  this->bias_w_x = sum_w_x / amount;
+  this->bias_w_y = sum_w_y / amount;
+  this->bias_w_z = sum_w_z / amount;
+
+  this->bias_a_x = sum_a_x / amount;
+  this->bias_a_y = sum_a_y / amount;
+  this->bias_a_z = sum_a_z / amount;
+
+  // this->bias_a_y = sum_a_y;
+  // this->bias_a_z = sum_a_z;
+}
+void Esim::imuReoutput(const sensor_msgs::Imu &imu_msg, sensor_msgs::Imu &imu_msg_out)
+{
+
+  imu_msg_out.linear_acceleration.x = imu_msg.linear_acceleration.x - this->bias_a_x;
+  imu_msg_out.linear_acceleration.y = imu_msg.linear_acceleration.y - this->bias_a_y;
+  imu_msg_out.linear_acceleration.z = imu_msg.linear_acceleration.z - this->bias_a_z;
+  imu_msg_out.angular_velocity.x = imu_msg.angular_velocity.x - this->bias_w_x;
+  imu_msg_out.angular_velocity.y = imu_msg.angular_velocity.y - this->bias_w_y;
+  imu_msg_out.angular_velocity.z = imu_msg.angular_velocity.z - this->bias_w_z;
+}
+void Esim::setEventThreshold(const float event_threshold)
+{
+  this->event_threshold = event_threshold;
+}
+
+// last_image : the last time after event was created 32UC1
+// curr_image : the current image 32UC1
+void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, const sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, const ros::Time &current_time, const ros::Time &last_time)
+{
+  cv::Mat last_image_ = this->mem_last_image.clone();
+  cv::Mat curr_image_ = curr_image->clone();
 
   float f_time_interval = current_time.toSec() - last_time.toSec();
-  // convert the image to float
 
-  last_image->convertTo(*last_image, CV_32F);
-  curr_image->convertTo(*curr_image, CV_32F);
+  curr_image_.convertTo(curr_image_, CV_32F);
+
+  curr_image_ += 1e-4;
+  last_image_ += 1e-4;
 
   // get the imu and depth messages
 
   // cv::log(*last_image, *last_image);
   // cv::log(*curr_image, *curr_image);
   assert(msg_dep_img.encoding == sensor_msgs::image_encodings::TYPE_32FC1);
+
   // convert the depth image from senso::Image to float
   assert(msg_dep_img.data.size() % sizeof(float) == 0);
-  float *depth_image = reinterpret_cast<float *>(msg_dep_img.data.data());
+  const float *depth_image = reinterpret_cast<float *>(msg_dep_img.data.data());
 
   if (imu_msg.orientation_covariance[0] < 0)
   {
     return;
   }
   // calculate the timestamp between two consecutive frames
-  ros::Time curr_time = imu_msg.header.stamp;
+  // ros::Time curr_time = imu_msg.header.stamp;
 
-  float delta_t_ = curr_time.sec - this->last_time.sec + (curr_time.nsec - this->last_time.nsec) / 1e9;
-  this->last_time = curr_time;
+  // float delta_t_ = curr_time.sec - this->last_time.sec + (curr_time.nsec - this->last_time.nsec) / 1e9;
+  sensor_msgs::Imu imu_msg_out;
+  this->imuReoutput(imu_msg, imu_msg_out);
 
-  this->velocity.x += imu_msg.linear_acceleration.x * delta_t_;
-  this->velocity.y += imu_msg.linear_acceleration.y * delta_t_;
-  this->velocity.z += imu_msg.linear_acceleration.z * delta_t_;
-  this->angular_velocity.x = imu_msg.angular_velocity.x;
-  this->angular_velocity.y = imu_msg.angular_velocity.y;
-  this->angular_velocity.z = imu_msg.angular_velocity.z;
+  this->velocity.x += (imu_msg_out.linear_acceleration.x) * f_time_interval;
+  this->velocity.y += (imu_msg_out.linear_acceleration.y) * f_time_interval;
+  this->velocity.z += (imu_msg_out.linear_acceleration.z) * f_time_interval;
+  this->angular_velocity.x = (imu_msg_out.angular_velocity.x);
+  this->angular_velocity.y = (imu_msg_out.angular_velocity.y);
+  this->angular_velocity.z = (imu_msg_out.angular_velocity.z);
 
-  float min_t_v, min_t_b;
-  this->adaptiveSample(last_image, curr_image, depth_image, f_time_interval, &min_t_v, &min_t_b);
+  float max_t_v, max_t_l;
+  this->adaptiveSample(&last_image_, &curr_image_, depth_image, f_time_interval, &max_t_v, &max_t_l);
   float lambda_b = 0.5, lambda_v = 0.5;
   // the sample interval between two events for events generation is 1 us.
-  float t_sample_interval = std::max(MIN_TIME_INTERVAL, lambda_b * min_t_b + lambda_v * min_t_v);
+  float t_sample_interval = std::min(std::min(MIN_TIME_INTERVAL, lambda_b * max_t_l), lambda_v * max_t_v);
   // caculate the slope matrix between the two frames
-  cv::Mat slope = cv::Mat::zeros(last_image->rows, last_image->cols, CV_32F);
-  slope.forEach<float>([&](float &pixel, const int *position) -> void
-                       { this->lightChange(last_image->at<float>(position[0], position[1]),
-                                           curr_image->at<float>(position[0], position[1]),
-                                           f_time_interval,
-                                           &pixel); });
-  cv::Mat last_image_, curr_image_;
+  cv::Mat slope = (curr_image_ - this->mem_last_image) / f_time_interval;
+  // slope.forEach<float>([&](float &pixel, const int *position) -> void
+  //                      { this->lightChange(last_image_.at<float>(position[0], position[1]),
+  //                                          curr_image_.at<float>(position[0], position[1]),
+  //                                          f_time_interval,
+  //                                          &pixel); });
+
   // convert to log intensity to store the last time after event was created
-  // cv::log(*last_image, last_image_);
-  last_image_ = last_image->clone();
+  // cv::log(last_image_, last_image_);
+  // cv::log(curr_image_, curr_image_);
   // use linear interpolation between the two frames.
   // add 1 means this function should be executed at least once.
-  // for (uint64_t iter_num = 0; iter_num < static_cast<uint64_t>(f_time_interval / t_sample_interval) + 1; iter_num++)
-  // {
-    // convert to log intensity to store the current image during the interpolation
-    // cv::log(*last_image + slope * t_sample_interval, curr_image_);
-    curr_image_ = *last_image + slope * f_time_interval;
-    // this->processDelta(&last_image_, &curr_image_, this->event_threshold, events);
-    this->processDelta(last_image, curr_image, this->event_threshold, events);
-  // }
+  if (t_sample_interval >= f_time_interval)
+  {
+    this->processDelta(&this->mem_last_image, &curr_image_, events);
+  }
+  else
+  {
+    // curr_image_ = temp_image_;
+    for (int iter_num = 0; iter_num < static_cast<int>(f_time_interval / t_sample_interval); iter_num++)
+    {
+      // convert to log intensity to store the current image during the interpolation
+      last_image_ += slope * t_sample_interval;
+      // ROS_INFO("=====%d %d %d====", this->mem_last_image.type(), curr_image_.type(), static_cast<int>(f_time_interval / t_sample_interval));
+      this->processDelta(&this->mem_last_image, &last_image_, events);
+      // this->processDelta(last_iamge, curr_image, events);
+      // ROS_INFO("%f", this->event_threshold);
+    }
+  }
+  // this->processDelta(last_image, curr_image, events);
   // for debug only
-  // this->_debug_fillEvents(static_cast<int>(f_time_interval * 1e9), static_cast<int>(t_sample_interval * 1e9), current_time, 1, events);
+  // this->_debug_fillEvents(static_cast<int>(f_time_interval / t_sample_interval), static_cast<int>(t_sample_interval * 1e9), current_time, 1, events);
 }
 
 // last_image : the last time after event was created
 // curr_image : the current image
 // this function will change the last_image in accordance with events activation after the event was created
-void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, const float event_threshold, std::vector<dvs_msgs::Event> *events)
+void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events)
 {
   if (curr_image->size() == last_image->size())
   {
@@ -130,19 +211,41 @@ void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, const fl
     cv::Mat pos_mask;
     cv::Mat neg_mask;
 
-    cv::threshold(pos_diff, pos_mask, event_threshold, 255, cv::THRESH_BINARY);
-    cv::threshold(neg_diff, neg_mask, event_threshold, 255, cv::THRESH_BINARY);
+    cv::threshold(pos_diff, pos_mask, this->event_threshold, 255, cv::THRESH_BINARY);
+    cv::threshold(neg_diff, neg_mask, this->event_threshold, 255, cv::THRESH_BINARY);
+    // pos_mask.forEach<float>([&](float &pixel, const int *position) -> void
+    //                         { pixel = pos_diff.at<float>(position[0], position[1]) > this->event_threshold ? 1 : 0; });
+    // neg_mask.forEach<float>([&](float &pixel, const int *position) -> void
+    //                         { pixel = neg_diff.at<float>(position[0], position[1]) > this->event_threshold ? 1 : 0; });
+    // *last_image += pos_diff.mul(pos_mask);
+    // *last_image -= neg_diff.mul(neg_mask);
 
-    // after event was created, these place where have yet activated should be set as the current value, instead of the initiated value.
-    *last_image += pos_mask & pos_diff;
-    *last_image -= neg_mask & neg_diff;
+    last_image->forEach<float>([&](float &pixel, const int *position) -> void
+                               {
+                                 if (pos_mask.at<float>(position[0], position[1]) >0)
+                                 {
+                                   pixel = curr_image->at<float>(position[0], position[1]);
+                                 }
+                                 if (neg_mask.at<float>(position[0], position[1]) >0)
+                                 {
+                                   pixel = curr_image->at<float>(position[0], position[1]);
+                                 } });
+    // *last_image += pos_mask & pos_diff;
+    // *last_image -= neg_mask & neg_diff;
+
+    // this->_debug_fillEvents(static_cast<int>(neg_mask.at<int>(0, 0)), static_cast<int>(pos_mask.at<int>(0, 0)), ros::Time::now(), 1, events);
+
+    // ROS_INFO("%d %f", pos_mask.type(), this->event_threshold);
+    pos_mask.convertTo(pos_mask, CV_32S);
+    neg_mask.convertTo(neg_mask, CV_32S);
 
     this->fillEvents(&pos_mask, 0, events);
     this->fillEvents(&neg_mask, 1, events);
+    // after event was created, these place where have yet activated should be set as the current value, instead of the initiated value.
   }
   else
   {
-    std::cout << "Unexpected change in image size (" << last_image->size() << " -> " << curr_image->size() << "). Publishing no events for this frame change." << std::endl;
+    gzwarn << "Unexpected change in image size (" << last_image->size() << " -> " << curr_image->size() << "). Publishing no events for this frame change." << std::endl;
   }
 }
 void Esim::egoVelocity(const float Z, const float u, const float v, float *B)
@@ -154,35 +257,36 @@ void Esim::egoVelocity(const float Z, const float u, const float v, float *B)
 void Esim::lightChange(const float last_pixel, const float curr_pixel, const float f_time_interval, float *delta_pixel)
 {
   // l1 and l2 are the logirithmic light intensities of the two frames
-  *delta_pixel = (last_pixel - curr_pixel) / f_time_interval;
+  *delta_pixel = std::fabs((last_pixel - curr_pixel) / f_time_interval);
 }
 
-void Esim::adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *min_t_v, float *min_t_b)
+void Esim::adaptiveSample(const cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *max_t_v, float *max_t_l)
 {
-  cv::Mat temp_image = cv::Mat::zeros(last_image->rows, last_image->cols, CV_32F);
-
+  cv::Mat last_image_(last_image->size(), CV_32F), temp_image_(last_image->size(), CV_32F);
   // calculate the velocity and angular velocity for the camera ego movement
-  temp_image.forEach<float>([&](float &pixel, const int *position) -> void
-                            {
+  temp_image_.forEach<float>([&](float &pixel, const int *position) -> void
+                             {
                                   float Z = curr_dep_img_[(position[0]*last_image->rows+ position[1])];
                                   this->egoVelocity(Z, position[0], position[1], &pixel); });
   // calculate the light change between the two frames
-  last_image->forEach<float>([&](float &l1, const int *position) -> void
+  last_image_.forEach<float>([&](float &p, const int *position) -> void
                              {
+       float l1 = last_image->at<float>(position[0], position[1]);                       
     float l2 = curr_image->at<float>(position[0], position[1]);
-    this->lightChange(l1, l2, f_time_interval, &l1); });
-  double temp_min_t_v, temp_min_t_b, max_;
+    this->lightChange(l1, l2, f_time_interval, &p); });
+  double temp_max_t_v, temp_max_t_l, min_;
   cv::Point min_loc, max_loc;
   // get the minimum value of the two
-  cv::minMaxLoc(temp_image, &temp_min_t_v, &max_, &min_loc, &max_loc);
-  cv::minMaxLoc(*last_image, &temp_min_t_b, &max_, &min_loc, &max_loc);
+  cv::minMaxLoc(temp_image_, &min_, &temp_max_t_v, &min_loc, &max_loc);
+  cv::minMaxLoc(last_image_, &min_, &temp_max_t_l, &min_loc, &max_loc);
 
-  *min_t_v = static_cast<float>(temp_min_t_v);
-  *min_t_b = static_cast<float>(temp_min_t_b);
+  // max_t_b is the change of the light intensity between the two frames
+  *max_t_v = static_cast<float>(1 / temp_max_t_v);
+  *max_t_l = static_cast<float>(1 / temp_max_t_l);
 }
 
 // void Esim::fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events)
-void Esim::fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events)
+void Esim::fillEvents(const cv::Mat *mask, const int polarity, std::vector<dvs_msgs::Event> *events)
 {
   // findNonZero fails when there are no zeros
   // TODO is there a better workaround then iterating the binary image twice?
@@ -203,7 +307,7 @@ void Esim::fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> 
   }
 }
 
-void Esim::_debug_fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events)
+void Esim::_debug_fillEvents(const int x, const int y, const ros::Time ts, const int p, std::vector<dvs_msgs::Event> *events)
 {
   dvs_msgs::Event event;
   event.x = x;

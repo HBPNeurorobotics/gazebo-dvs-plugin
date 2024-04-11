@@ -54,29 +54,42 @@
 class GAZEBO_VISIBLE Esim
 {
 public:
-  float event_threshold;
   // the minimum time interval between two events for events generation
-  static constexpr float MIN_TIME_INTERVAL = 1e-7;
+  static constexpr float MIN_TIME_INTERVAL = 1e-4;
 
 private:
   geometry_msgs::Vector3 angular_velocity, velocity;
   ros::Time last_time;
+  cv::Mat mem_last_image;
+  int cols, rows;
+  float event_threshold;
+  float bias_a_x, bias_a_y, bias_a_z, bias_w_x, bias_w_y, bias_w_z;
 
 public:
   Esim();
+
+  Esim(float event_threshold, int width, int height);
+
   ~Esim();
-  void simulateESIM(cv::Mat *last_image, cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, ros::Time &current_time, ros::Time &last_time);
+
+  void simulateESIM(cv::Mat *last_iamge,const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, const sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, const ros::Time &current_time, const ros::Time &last_time);
+
+  void imuCalibration(const std::vector<sensor_msgs::Imu> *imu_msg);
+
+  void imuReoutput(const sensor_msgs::Imu &imu_msg, sensor_msgs::Imu &imu_msg_out);
+
+  void setEventThreshold(const float event_threshold);
 
 private:
   void egoVelocity(const float Z, const float u, const float v, float *B);
 
   void lightChange(const float last_pixel, const float curr_pixel, const float f_time_interval, float *delta_pixel);
 
-  void adaptiveSample(cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *min_t_v, float *min_t_b);
+  void adaptiveSample(const cv::Mat *last_image, const cv::Mat *curr_image, const float *curr_dep_img_, const float f_time_interval, float *min_t_v, float *min_t_b);
 
-  void processDelta(cv::Mat *last_image, const cv::Mat *curr_image, const float event_threshold, std::vector<dvs_msgs::Event> *events);
+  void processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events);
 
-  void fillEvents(cv::Mat *mask, int polarity, std::vector<dvs_msgs::Event> *events);
+  void fillEvents(const cv::Mat *mask, const int polarity, std::vector<dvs_msgs::Event> *events);
 
-  void _debug_fillEvents(int x, int y, ros::Time ts, int p, std::vector<dvs_msgs::Event> *events);
+  void _debug_fillEvents(const int x, const int y, const ros::Time ts, const int p, std::vector<dvs_msgs::Event> *events);
 };

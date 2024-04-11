@@ -51,12 +51,11 @@ namespace gazebo
   ////////////////////////////////////////////////////////////////////////////////
   // Constructor
   DvsPlugin::DvsPlugin()
-      : SensorPlugin(), width(0), height(0), depth(0), has_last_image(false)
+      : SensorPlugin(), width(0), height(0), depth(0), has_last_image(false), imu_cali_flag(false)
   {
     // store the t1 and t2 for two immediate frames.
     this->current_time_ = ros::Time::now();
     this->last_time_ = ros::Time::now();
-    this->esim = Esim();
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -135,15 +134,17 @@ namespace gazebo
     // Make sure the parent sensors are active
     this->parentCameraSensor->SetActive(true);
 
-    this->imu_sub_ = this->node_handle_.subscribe("/camera/imu", 1000, &DvsPlugin::imuCallback, this);
+    this->imu_sub_ = this->node_handle_.subscribe("/imu", 1000, &DvsPlugin::imuCallback, this);
     this->dep_sub_ = this->node_handle_.subscribe("/camera/depth/image_raw", 1000, &DvsPlugin::depthCallback, this);
 
     // Initialize the publisher that publishes the IMU data
     // this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
     // this->dep_pub_ = this->node_handle_.advertise<sensor_msgs::Image>("/depth/image_raw", 1000);
 
-    // set the threshold for event camera
-    esim.event_threshold = this->event_threshold;
+    this->esim = Esim(this->event_threshold, this->width, this->height);
+
+    // // set the threshold for event camera
+    // this->esim.setEventThreshold(this->event_threshold);
   }
 
   ////////////////////////////////////////////////////////////////////////////////
@@ -194,27 +195,43 @@ float dt = 1.0 / rate;
           std::cout << "ERROR";
         }
     */
+    // accuquire the img message for calibration
 
-    assert(_height == height && _width == width);
-    if (this->has_last_image)
+    if (!this->imu_cali_flag)
     {
-      std::vector<dvs_msgs::Event> events;
-      this->processDelta(&this->last_image, &curr_image,  &events);
-      // esim.simulateESIM(&this->last_image, &curr_image, &events, this->imu_msg_, this->dep_img_, this->current_time_, this->last_time_);
-
-      this->publishEvents(&events);
-    }
-    else if (curr_image.size().area() > 0)
-    {
-      this->last_image = curr_image;
-      this->has_last_image = true;
-      // clear all the items in tunnel for a next step storing.
-      // this->imu_msgs_.clear();
-      this->last_time_ = this->current_time_;
+      vector<sensor_msgs::Imu> imu_msgs;
+      while (imu_msgs.size() < 1000)
+      {
+        if (this->imu_msg_.linear_acceleration_covariance[0] < 0 || this->imu_msg_.angular_velocity_covariance[0] < 0)
+        {
+          continue;
+        }
+        imu_msgs.push_back(this->imu_msg_);
+      }
+      this->esim.imuCalibration(&imu_msgs);
+      this->imu_cali_flag = true;
     }
     else
     {
-      gzwarn << "Ignoring empty image." << endl;
+      assert(_height == height && _width == width);
+      if (this->has_last_image)
+      {
+        std::vector<dvs_msgs::Event> events;
+        // this->processDelta(&this->last_image, &curr_image,  &events);
+        this->esim.simulateESIM(&this->last_image, &curr_image, &events, this->imu_msg_, this->dep_img_, this->current_time_, this->last_time_);
+
+        this->last_time_ = this->current_time_;
+        this->publishEvents(&events);
+      }
+      else if (curr_image.size().area() > 0)
+      {
+        this->last_image = curr_image;
+        this->has_last_image = true;
+      }
+      else
+      {
+        gzwarn << "Ignoring empty image." << endl;
+      }
     }
   }
 
@@ -234,10 +251,10 @@ float dt = 1.0 / rate;
       *last_image += pos_mask & pos_diff;
       *last_image -= neg_mask & neg_diff;
 
-      std::vector<dvs_msgs::Event> events;
+      // std::vector<dvs_msgs::Event> events;
 
-      this->fillEvents(&pos_mask, 0, &events);
-      this->fillEvents(&neg_mask, 1, &events);
+      this->fillEvents(&pos_mask, 0, events);
+      this->fillEvents(&neg_mask, 1, events);
 
       // this->publishEvents(&events);
     }
