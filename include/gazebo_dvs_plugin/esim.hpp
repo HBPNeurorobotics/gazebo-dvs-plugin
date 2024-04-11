@@ -72,7 +72,7 @@ public:
 
   ~Esim();
 
-  void simulateESIM(cv::Mat *last_iamge,const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, const sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, const ros::Time &current_time, const ros::Time &last_time);
+  void simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events, const sensor_msgs::Imu &imu_msg, sensor_msgs::Image &msg_dep_img, const ros::Time &current_time, const ros::Time &last_time);
 
   void imuCalibration(const std::vector<sensor_msgs::Imu> *imu_msg);
 
@@ -90,6 +90,4 @@ private:
   void processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vector<dvs_msgs::Event> *events);
 
   void fillEvents(const cv::Mat *mask, const int polarity, std::vector<dvs_msgs::Event> *events);
-
-  void _debug_fillEvents(const int x, const int y, const ros::Time ts, const int p, std::vector<dvs_msgs::Event> *events);
 };

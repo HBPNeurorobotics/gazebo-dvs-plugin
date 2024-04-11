@@ -98,8 +98,6 @@ void Esim::imuCalibration(const std::vector<sensor_msgs::Imu> *imu_msgs)
   this->bias_a_y = sum_a_y / amount;
   this->bias_a_z = sum_a_z / amount;
 
-  // this->bias_a_y = sum_a_y;
-  // this->bias_a_z = sum_a_z;
 }
 void Esim::imuReoutput(const sensor_msgs::Imu &imu_msg, sensor_msgs::Imu &imu_msg_out)
 {
@@ -132,8 +130,6 @@ void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vec
 
   // get the imu and depth messages
 
-  // cv::log(*last_image, *last_image);
-  // cv::log(*curr_image, *curr_image);
   assert(msg_dep_img.encoding == sensor_msgs::image_encodings::TYPE_32FC1);
 
   // convert the depth image from senso::Image to float
@@ -145,9 +141,6 @@ void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vec
     return;
   }
   // calculate the timestamp between two consecutive frames
-  // ros::Time curr_time = imu_msg.header.stamp;
-
-  // float delta_t_ = curr_time.sec - this->last_time.sec + (curr_time.nsec - this->last_time.nsec) / 1e9;
   sensor_msgs::Imu imu_msg_out;
   this->imuReoutput(imu_msg, imu_msg_out);
 
@@ -165,38 +158,21 @@ void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vec
   float t_sample_interval = std::min(std::min(MIN_TIME_INTERVAL, lambda_b * max_t_l), lambda_v * max_t_v);
   // caculate the slope matrix between the two frames
   cv::Mat slope = (curr_image_ - this->mem_last_image) / f_time_interval;
-  // slope.forEach<float>([&](float &pixel, const int *position) -> void
-  //                      { this->lightChange(last_image_.at<float>(position[0], position[1]),
-  //                                          curr_image_.at<float>(position[0], position[1]),
-  //                                          f_time_interval,
-  //                                          &pixel); });
 
   // convert to log intensity to store the last time after event was created
-  // cv::log(last_image_, last_image_);
-  // cv::log(curr_image_, curr_image_);
-  // use linear interpolation between the two frames.
-  // add 1 means this function should be executed at least once.
   if (t_sample_interval >= f_time_interval)
   {
     this->processDelta(&this->mem_last_image, &curr_image_, events);
   }
   else
   {
-    // curr_image_ = temp_image_;
     for (int iter_num = 0; iter_num < static_cast<int>(f_time_interval / t_sample_interval); iter_num++)
     {
       // convert to log intensity to store the current image during the interpolation
       last_image_ += slope * t_sample_interval;
-      // ROS_INFO("=====%d %d %d====", this->mem_last_image.type(), curr_image_.type(), static_cast<int>(f_time_interval / t_sample_interval));
       this->processDelta(&this->mem_last_image, &last_image_, events);
-      // this->processDelta(last_iamge, curr_image, events);
-      // ROS_INFO("%f", this->event_threshold);
     }
   }
-  // this->processDelta(last_image, curr_image, events);
-  // for debug only
-  // this->_debug_fillEvents(static_cast<int>(f_time_interval / t_sample_interval), static_cast<int>(t_sample_interval * 1e9), current_time, 1, events);
-}
 
 // last_image : the last time after event was created
 // curr_image : the current image
@@ -213,12 +189,6 @@ void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vec
 
     cv::threshold(pos_diff, pos_mask, this->event_threshold, 255, cv::THRESH_BINARY);
     cv::threshold(neg_diff, neg_mask, this->event_threshold, 255, cv::THRESH_BINARY);
-    // pos_mask.forEach<float>([&](float &pixel, const int *position) -> void
-    //                         { pixel = pos_diff.at<float>(position[0], position[1]) > this->event_threshold ? 1 : 0; });
-    // neg_mask.forEach<float>([&](float &pixel, const int *position) -> void
-    //                         { pixel = neg_diff.at<float>(position[0], position[1]) > this->event_threshold ? 1 : 0; });
-    // *last_image += pos_diff.mul(pos_mask);
-    // *last_image -= neg_diff.mul(neg_mask);
 
     last_image->forEach<float>([&](float &pixel, const int *position) -> void
                                {
@@ -230,18 +200,12 @@ void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vec
                                  {
                                    pixel = curr_image->at<float>(position[0], position[1]);
                                  } });
-    // *last_image += pos_mask & pos_diff;
-    // *last_image -= neg_mask & neg_diff;
 
-    // this->_debug_fillEvents(static_cast<int>(neg_mask.at<int>(0, 0)), static_cast<int>(pos_mask.at<int>(0, 0)), ros::Time::now(), 1, events);
-
-    // ROS_INFO("%d %f", pos_mask.type(), this->event_threshold);
     pos_mask.convertTo(pos_mask, CV_32S);
     neg_mask.convertTo(neg_mask, CV_32S);
 
     this->fillEvents(&pos_mask, 0, events);
     this->fillEvents(&neg_mask, 1, events);
-    // after event was created, these place where have yet activated should be set as the current value, instead of the initiated value.
   }
   else
   {
@@ -305,14 +269,4 @@ void Esim::fillEvents(const cv::Mat *mask, const int polarity, std::vector<dvs_m
       events->push_back(event);
     }
   }
-}
-
-void Esim::_debug_fillEvents(const int x, const int y, const ros::Time ts, const int p, std::vector<dvs_msgs::Event> *events)
-{
-  dvs_msgs::Event event;
-  event.x = x;
-  event.y = y;
-  event.ts = ts;
-  event.polarity = p;
-  events->push_back(event);
 }
