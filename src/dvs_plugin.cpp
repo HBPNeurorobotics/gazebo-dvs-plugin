@@ -115,12 +115,6 @@ namespace gazebo
 
     const string eventTopic = sensorName + eventName;
 
-    string imuName = "imu";
-    if (_sdf->HasElement("imuTopicName"))
-      imuName = _sdf->GetElement("imuTopicName")->Get<std::string>();
-
-    const string imuTopic = sensorName + imuName;
-
     if (_sdf->HasElement("eventThreshold"))
       this->event_threshold = _sdf->GetElement("eventThreshold")->Get<float>();
     else
@@ -138,13 +132,7 @@ namespace gazebo
     this->dep_sub_ = this->node_handle_.subscribe("/camera/depth/image_raw", 1000, &DvsPlugin::depthCallback, this);
 
     // Initialize the publisher that publishes the IMU data
-    // this->imu_pub_ = this->node_handle_.advertise<sensor_msgs::Imu>(imuTopic, 1000);
-    // this->dep_pub_ = this->node_handle_.advertise<sensor_msgs::Image>("/depth/image_raw", 1000);
-
     this->esim = Esim(this->event_threshold, this->width, this->height);
-
-    // // set the threshold for event camera
-    // this->esim.setEventThreshold(this->event_threshold);
   }
 
   ////////////////////////////////////////////////////////////////////////////////

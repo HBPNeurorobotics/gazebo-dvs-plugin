@@ -98,7 +98,6 @@ namespace gazebo
 
     // for imu and depth data accquisition
     ros::Subscriber imu_sub_, dep_sub_;
-    // ros::Publisher imu_pub_, dep_pub_;
     // depth image
     sensor_msgs::Image dep_img_;
     // store a sequence of imu messages for ESIM computing.
@@ -116,7 +115,6 @@ namespace gazebo
     void fillEvents(Mat *diff, int polarity, vector<dvs_msgs::Event> *events);
     void publishEvents(vector<dvs_msgs::Event> *events);
     void depthCallback(const sensor_msgs::ImageConstPtr &msg);
-    // private: void EsimProcess(cv::Mat *last_image, cv::Mat *curr_image, std::vector<sensor_msgs::Imu> &imu_msgs, std::vector<dvs_msgs::Event> *events, const float * depthImage, const float current_time, const float last_time);
   };
 }
 #endif

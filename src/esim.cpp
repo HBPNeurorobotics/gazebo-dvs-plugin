@@ -97,7 +97,6 @@ void Esim::imuCalibration(const std::vector<sensor_msgs::Imu> *imu_msgs)
   this->bias_a_x = sum_a_x / amount;
   this->bias_a_y = sum_a_y / amount;
   this->bias_a_z = sum_a_z / amount;
-
 }
 void Esim::imuReoutput(const sensor_msgs::Imu &imu_msg, sensor_msgs::Imu &imu_msg_out)
 {
@@ -173,6 +172,7 @@ void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vec
       this->processDelta(&this->mem_last_image, &last_image_, events);
     }
   }
+}
 
 // last_image : the last time after event was created
 // curr_image : the current image
@@ -212,6 +212,7 @@ void Esim::processDelta(cv::Mat *last_image, const cv::Mat *curr_image, std::vec
     gzwarn << "Unexpected change in image size (" << last_image->size() << " -> " << curr_image->size() << "). Publishing no events for this frame change." << std::endl;
   }
 }
+
 void Esim::egoVelocity(const float Z, const float u, const float v, float *B)
 {
   // page 12 formula 4 for "ESIM: an Open Event Camera Simulator"
