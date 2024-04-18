@@ -154,7 +154,7 @@ void Esim::simulateESIM(cv::Mat *last_iamge, const cv::Mat *curr_image, std::vec
   this->adaptiveSample(&last_image_, &curr_image_, depth_image, f_time_interval, &max_t_v, &max_t_l);
   float lambda_b = 0.5, lambda_v = 0.5;
   // the sample interval between two events for events generation is 1 us.
-  float t_sample_interval = std::min(std::min(MIN_TIME_INTERVAL, lambda_b * max_t_l), lambda_v * max_t_v);
+  float t_sample_interval = std::min(lambda_b * max_t_l, lambda_v * max_t_v);
   // caculate the slope matrix between the two frames
   cv::Mat slope = (curr_image_ - this->mem_last_image) / f_time_interval;
 

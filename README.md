@@ -16,7 +16,47 @@ Both, the DVS plugin and the [CameraPlugin](https://bitbucket.org/osrf/gazebo/sr
 use the Gazebo [CameraSensor](https://bitbucket.org/osrf/gazebo/src/666bf30ad9a3c042955b55f79cf1a5416a70d83d/gazebo/sensors/CameraSensor.cc) internally.
 
 The following SDF snippet shows an example usage:
-
+```xml
+<?xml version='1.0'?>
+<sdf version='1.7'>
+  <model name='event_camera'>
+  <pose>0 0 0 0 0 0</pose>
+   <link name="link">
+        <inertial>
+          <mass>0.015</mass>
+          <inertia>
+            <ixx>4.15e-6</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>2.407e-6</iyy>
+          <iyz>0</iyz>
+          <izz>2.407e-6</izz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>0.01 0.01 0.01</size>
+            </box>
+          </geometry>
+          <max_contacts>10</max_contacts>
+          <surface>
+            <contact>
+              <ode/>
+            </contact>
+            <bounce/>
+            <friction>
+              <ode/>
+            </friction>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>0.01 0.01 0.01</size>
+            </box>
+          </geometry>
+        </visual>
     <sensor name='camera' type='camera'>
         <camera name='__default__'>
             <horizontal_fov>1.8</horizontal_fov>
@@ -30,16 +70,24 @@ The following SDF snippet shows an example usage:
             </clip>
         </camera>
         <always_on>1</always_on>
-        <update_rate>60</update_rate>
-        <visualize>0</visualize>
+        <update_rate>400</update_rate>
+        <visualize>1</visualize>
         <plugin name='camera_controller' filename='libgazebo_dvs_plugin.so'>
-            <cameraName>camera_front</cameraName>
-            <robotNamespace>AADC_AudiTT</robotNamespace>
-            <eventThreshold>10</eventThreshold>
+            <sensorName>dvs</sensorName>
+            <robotNamespace>/</robotNamespace>
+            <eventThreshold>20</eventThreshold>
+            <eventsTopicName>events</eventsTopicName>
+            <imageTopicName>image_raw</imageTopicName>
+            <!-- <imuTopicName>imu</imuTopicName> -->
             <cameraInfoTopicName>camera_info</cameraInfoTopicName>
-            <!-- <eventsTopicName>events</eventsTopicName> -->
         </plugin>
     </sensor>
+    <self_collide>0</self_collide>
+   <kinematic>0</kinematic>
+  </link>
+  </model>
+</sdf>
+```
 
 The parameters `robotNamespace`, `cameraName` and `eventsTopicName` (default: "events") result in `"$robotNamespace/$cameraName/$eventsTopicName"`
 as the identifier of the provided events topic.
@@ -53,7 +101,7 @@ Still, this implementation yields a higher event frequency than similar Python-b
 
 # Acknowledgement
 
-If you used this code for your research, please consider citing the paper [Towards a framework for end-to-end control of a simulated vehicle with spiking neural networks](http://ieeexplore.ieee.org/document/7862386/).
+We thank paper [Towards a framework for end-to-end control of a simulated vehicle with spiking neural networks](http://ieeexplore.ieee.org/document/7862386/) for their open source, please cite there paper if you use this code.
 
 ```
 @INPROCEEDINGS{7862386,
